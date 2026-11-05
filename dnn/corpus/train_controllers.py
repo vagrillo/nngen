@@ -107,7 +107,8 @@ def generate_task(
         val = split == "val"
         seed = _batch_seed(task_name, batch_id, val)
         lr_rng = torch.Generator().manual_seed(seed)
-        lr = 10 ** torch.empty(1).uniform_(-3.3, -2.5, generator=lr_rng).item()
+        # log-uniform around the sweet spot found by pilots (~3e-3, 250 steps)
+        lr = 10 ** torch.empty(1).uniform_(-2.7, -2.4, generator=lr_rng).item()
         flat, scores, success = trainer.train_batch(seed, lr, train_steps)
         for i in range(batch):
             if len(kept) >= quota:
@@ -171,7 +172,7 @@ def main() -> None:
     ap.add_argument("--tasks", default="all", help="'all' or comma-separated task names")
     ap.add_argument("--per-task", type=int, default=600)
     ap.add_argument("--batch", type=int, default=64)
-    ap.add_argument("--train-steps", type=int, default=300)
+    ap.add_argument("--train-steps", type=int, default=250)
     ap.add_argument("--val-frac", type=float, default=0.08)
     ap.add_argument("--out", default="data/corpus")
     ap.add_argument("--workers", type=int, default=3, help="parallel task workers")

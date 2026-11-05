@@ -52,8 +52,12 @@ def save_checkpoint(
     )
 
 
-def load_checkpoint(run_dir: Path) -> dict:
-    return torch.load(run_dir / CKPT_FILE, map_location="cpu", weights_only=False)
+def load_checkpoint(path: str | Path) -> dict:
+    """Load a checkpoint from a run directory or a ckpt.pt file path."""
+    p = Path(path)
+    if p.is_dir():
+        p = p / CKPT_FILE
+    return torch.load(p, map_location="cpu", weights_only=False)
 
 
 def main() -> None:

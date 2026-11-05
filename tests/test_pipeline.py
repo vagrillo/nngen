@@ -11,8 +11,8 @@ import json
 import numpy as np
 import torch
 
-from dnn.config import NUM_PARAMS, get_preset
-from dnn.controller import ParamStats, flat_to_canvas, mask_flat
+from dnn.config import get_preset
+from dnn.controller import NUM_PARAMS, ParamStats, flat_to_canvas, mask_flat
 from dnn.corpus.embed_captions import embed_captions
 from dnn.corpus.store import Corpus, save_weights
 from dnn.diffusion.sampler import Diffusion
@@ -82,7 +82,7 @@ def test_fake_corpus(tmp_path):
 
 
 def test_train_and_generate_smoke(tmp_path):
-    import shutil
+    _build_fake_corpus(tmp_path)
 
     run_dir = tmp_path / "runs" / "smoke"
     run_dir.mkdir(parents=True)
