@@ -1,0 +1,8 @@
+torch>=2.5
+numpy
+safetensors
+sentence-transformers
+transformers
+matplotlib
+pillow
+pytest
