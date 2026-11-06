@@ -177,7 +177,7 @@ def main() -> None:
     ap.add_argument("--tasks", default="all", help="'all' or comma-separated task names")
     ap.add_argument("--per-task", type=int, default=600)
     ap.add_argument("--batch", type=int, default=64)
-    ap.add_argument("--train-steps", type=int, default=250)
+    ap.add_argument("--train-steps", type=int, default=400)
     ap.add_argument("--val-frac", type=float, default=0.08)
     ap.add_argument("--out", default="data/corpus")
     ap.add_argument("--workers", type=int, default=3, help="parallel task workers")

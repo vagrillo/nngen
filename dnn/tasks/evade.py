@@ -16,14 +16,14 @@ class EvadeTask(BaseTask):
         "Output: 2D acceleration command.",
     )
 
-    VMAX = 1.3       # agent is slightly faster than the pursuer
+    VMAX = 1.45      # agent is clearly faster than the pursuer
     AMAX = 4.0
     P_SPEED = 1.0    # constant pursuer speed
-    CAUGHT = 0.12    # capture distance
+    CAUGHT = 0.10    # capture distance
 
     def reset(self, batch: int, gen: torch.Generator) -> dict:
-        pos = u(gen, batch, 2, lo=-0.9, hi=0.9)
-        pursuer = pos + u(gen, batch, 2, lo=0.4, hi=0.8) * (torch.randint(0, 2, (batch, 2), generator=gen) * 2 - 1)
+        pos = u(gen, batch, 2, lo=-0.85, hi=0.85)
+        pursuer = pos + u(gen, batch, 2, lo=0.5, hi=0.9) * (torch.randint(0, 2, (batch, 2), generator=gen) * 2 - 1)
         pursuer = pursuer.clamp(-0.95, 0.95)
         return {
             "pos": pos,
@@ -64,7 +64,7 @@ class EvadeTask(BaseTask):
     def success(self, states: list[dict]) -> torch.Tensor:
         with torch.no_grad():
             d = self._dists(states)
-            return (d.min(dim=0).values > self.CAUGHT) & (d.mean(dim=0) > 0.45)
+            return (d.min(dim=0).values > self.CAUGHT) & (d.mean(dim=0) > 0.38)
 
     def report(self, states: list[dict]) -> dict[str, float]:
         with torch.no_grad():
