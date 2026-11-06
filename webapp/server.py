@@ -36,6 +36,13 @@ PAGES = BASE / "pages"
 STATIC = BASE / "static"
 ARTIFACTS = ROOT / "runs" / "web_demo"          # generated jobs land here
 
+# Make the repository's `dnn` package importable no matter where the server
+# is launched from (running as a script puts webapp/ on sys.path, not ./).
+import sys
+
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 PORT = 17656
 CHECKPOINT = ROOT / "runs" / "draw_mvp" / "ckpt.pt"
 
@@ -48,10 +55,15 @@ _lock = threading.Lock()
 
 
 class DemoBackend:
-    """Lazy singleton holding the checkpoint, diffusion sampler and encoder."""
+    """Lazy singleton holding the checkpoint, diffusion sampler and encoder.
+
+    Reloads automatically when the checkpoint file changes on disk (e.g. a
+    training run saves a better EMA while the server stays up).
+    """
 
     def __init__(self) -> None:
         self._loaded = False
+        self._ckpt_mtime: float | None = None
         self.model = None
         self.diff = None
         self.stats = None
@@ -59,8 +71,15 @@ class DemoBackend:
         self.encoder = None
         self.error: str | None = None
 
+    def _checkpoint_changed(self) -> bool:
+        try:
+            mtime = CHECKPOINT.stat().st_mtime
+        except OSError:
+            return False
+        return mtime != self._ckpt_mtime
+
     def load(self) -> bool:
-        if self._loaded:
+        if self._loaded and not self._checkpoint_changed():
             return self.error is None
         self._loaded = True
         try:
@@ -72,16 +91,20 @@ class DemoBackend:
             from dnn.text_encoder import TextEncoder
             from dnn.train_diffusion import load_checkpoint
 
+            self._ckpt_mtime = CHECKPOINT.stat().st_mtime
             ckpt = load_checkpoint(CHECKPOINT)
-            self.model = UNet(DiffusionConfig(**ckpt["model_cfg"]))
-            self.model.load_state_dict({k: v.to(torch.float32) for k, v in ckpt["ema"].items()})
-            self.model.eval()
+            model = UNet(DiffusionConfig(**ckpt["model_cfg"]))
+            model.load_state_dict({k: v.to(torch.float32) for k, v in ckpt["ema"].items()})
+            model.eval()
+            self.model = model
             self.diff = Diffusion(DiffusionConfig(**ckpt["model_cfg"]))
             from dnn.controller import ParamStats
 
             self.stats = ParamStats.from_json(ckpt["stats"])
-            self.encoder = TextEncoder()
+            if self.encoder is None:
+                self.encoder = TextEncoder()
             self.null = self.encoder.encode([""])
+            self.error = None
         except Exception as e:  # missing checkpoint, missing deps, ...
             self.error = f"{type(e).__name__}: {e}"
         return self.error is None
