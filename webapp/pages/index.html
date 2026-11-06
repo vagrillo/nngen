@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NNGen — TEXT to NEURAL NETWORK generator</title>
+<link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+{{header}}
+
+<section class="hero">
+  <div class="kicker">TEXT&nbsp;&rarr;&nbsp;NEURAL&nbsp;NETWORK&nbsp;GENERATOR</div>
+  <h1>Describe a behavior.<br>Get a working neural network.</h1>
+  <p class="lead">NNGen is a diffusion model with a text-to-image architecture —
+  except the &ldquo;image&rdquo; it denoises is the <strong>weight tensor of a working
+  neural network</strong>. Describe a behavior in English, get a brand-new
+  network that performs it.</p>
+  <p class="cta"><a class="button" href="demo">Try the demo &rarr;</a></p>
+</section>
+
+<section class="grid2">
+  <div class="card">
+    <h2>How it works</h2>
+    <p>Training pairs mirror the text-to-image recipe — <em>(image, caption)</em>
+    becomes <em>(network, caption)</em>:</p>
+    <ul>
+      <li>The <strong>image</strong> is a 6&times;32&times;32 <em>weight canvas</em>:
+      the six parameter tensors of a small fixed-size controller MLP
+      (8&rarr;32&rarr;32&rarr;8, ~1.6k parameters), laid out like image channels.</li>
+      <li>The <strong>caption</strong> is an English description of the
+      behavior (&ldquo;a tiny MLP that drives a pen to trace a five-pointed star&rdquo;).</li>
+      <li>The <strong>corpus</strong> is synthesized: thousands of controllers are
+      trained through differentiable mini-environments for games and animation
+      tasks, filtered by held-out rollout success, and captioned from templates.
+      No human-labeled data.</li>
+    </ul>
+    <p>A UNet with text cross-attention (v-prediction, cosine schedule, DDIM
+    sampling, classifier-free guidance) learns to denoise weight canvases
+    conditioned on the description — exactly how text-to-image models work,
+    one level of abstraction higher.</p>
+  </div>
+  <div class="card">
+    <h2>What you get</h2>
+    <p>Sampling from a prompt yields a brand-new network that is loaded and
+    executed directly in the target environment:</p>
+    <ul>
+      <li><strong>The network</strong> — a real model, exported as
+      <code>safetensors</code>, ~1.6k parameters, runs anywhere (CPU, microcontroller, browser).</li>
+      <li><strong>The behavior</strong> — a rollout GIF of the generated network
+      acting in its environment, plus quality metrics.</li>
+      <li><strong>The weights, visualized</strong> — a heatmap of the generated
+      weight canvas.</li>
+    </ul>
+    <p>The demo focuses on <strong>drawing behaviors</strong>: networks that drive a
+    virtual pen to trace geometric shapes. Training shapes include circles,
+    squares, triangles, pentagons, stars, spirals, lines and arcs &mdash; and two
+    shapes are <em>deliberately held out</em> (hexagon, octagon) to test
+    whether the model generalizes to shapes it has never seen.</p>
+  </div>
+</section>
+
+<section>
+  <h2>Task families</h2>
+  <p>Every generated network drives the same canonical MLP; each task family
+  is a different mini-environment:</p>
+  <table>
+    <tr><th>Task</th><th>Domain</th><th>Behavior</th></tr>
+    <tr><td><code>seek</code></td><td>game</td><td>chase a moving target on a 2D arena</td></tr>
+    <tr><td><code>evade</code></td><td>game</td><td>escape a proportional-pursuit chaser</td></tr>
+    <tr><td><code>balance</code></td><td>game</td><td>stabilize a cart-pole</td></tr>
+    <tr><td><code>bounce</code></td><td>game</td><td>paddle intercepts a bouncing ball</td></tr>
+    <tr><td><code>gait</code></td><td>animation</td><td>two-joint leg IK: foot traces a stride ellipse</td></tr>
+    <tr><td><code>orbit</code></td><td>animation</td><td>thrust a satellite into a circular orbit</td></tr>
+    <tr><td><code>draw_*</code></td><td>drawing</td><td>turtle-graphics pen traces a target shape</td></tr>
+  </table>
+</section>
+
+<section class="novelty">
+  <h2>The novel twist: diffusion, but for weight matrices</h2>
+  <p class="lead">Diffusion models power today's image generators. Their core trick
+  is humble: learn to <strong>remove noise from a matrix of numbers</strong>, step by
+  step, guided by a text description. NNGen observes that a neural network
+  <em>is</em> a matrix of numbers &mdash; so the very same machinery, unchanged,
+  can denoise <strong>weights</strong> instead of pixels.</p>
+  <table class="compare">
+    <tr><th></th><th>Text-to-image (Stable Diffusion&hellip;)</th><th>NNGen — text-to-network</th></tr>
+    <tr><td>The &ldquo;image&rdquo;</td><td>RGB pixel grid, 3&times;64&times;64</td><td>weight canvas, 6&times;32&times;32</td></tr>
+    <tr><td>What it learns to denoise</td><td>colors of a picture</td><td>parameters of a working MLP</td></tr>
+    <tr><td>Text conditioning</td><td>&ldquo;a cat astronaut, oil painting&rdquo;</td><td>&ldquo;a controller that traces a star&rdquo;</td></tr>
+    <tr><td>Techniques</td><td colspan="2">identical: UNet &middot; v-prediction &middot; cosine schedule &middot; DDIM sampling &middot; classifier-free guidance</td></tr>
+    <tr><td>Output</td><td>a picture that <em>looks like</em> something</td><td>a network that <em>does</em> something</td></tr>
+  </table>
+  <p>Nothing about the diffusion process knows it is generating &ldquo;intelligence&rdquo;
+  &mdash; it only ever sees matrices. Yet because the training corpus pairs each
+  matrix with a description of <em>what it accomplishes</em>, sampling from noise
+  yields a functioning behavior. That is the step beyond generative media:
+  <strong>from pictures of things, to the things themselves.</strong></p>
+</section>
+
+<section class="grid2">
+  <div class="card">
+    <h2>Why it matters</h2>
+    <p>Today, getting a small neural network for a specific behavior means
+    collecting data, training, and validating &mdash; specialist work per network.
+    NNGen moves that cost from human effort to compute: the training corpus is
+    self-generated, and inference (generating a new network from text) runs in
+    seconds on a CPU.</p>
+    <p>The long-term vision: a <strong>queryable catalog of tiny models</strong> —
+    &ldquo;give me a network that does X in under 2k parameters&rdquo; — for games,
+    animation, UI agents and embedded devices.</p>
+  </div>
+  <div class="card">
+    <h2>Honest limits</h2>
+    <ul>
+      <li>This is a <strong>research prototype</strong>: small networks, simple
+      behaviors, one fixed architecture per generator.</li>
+      <li>The model can only generate behaviors resembling its training
+      corpus &mdash; and, in the best case, <em>interpolate</em> between them
+      (that is what the held-out hexagon test measures).</li>
+      <li>Quality depends on corpus size; a GPU multiplies both by an order
+      of magnitude.</li>
+    </ul>
+  </div>
+</section>
+
+{{footer}}
+</body>
+</html>

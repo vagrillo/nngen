@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NNGen — Documentation</title>
+<link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+{{header}}
+
+<section class="hero">
+  <div class="kicker">TEXT&nbsp;&rarr;&nbsp;NEURAL&nbsp;NETWORK&nbsp;GENERATOR</div>
+  <h1>Documentation</h1>
+  <p class="lead">How NNGen turns a text description into a working neural network.</p>
+</section>
+
+<section>
+  <h2>1. The core idea</h2>
+  <p>Text-to-image diffusion models learn the mapping <em>caption &rarr; pixels</em>
+  from millions of (image, caption) pairs. NNGen applies the same machinery one
+  level up: it learns the mapping <em>caption &rarr; neural network weights</em>.</p>
+  <p>The &ldquo;image&rdquo; being denoised is the <strong>weight canvas</strong>: the
+  parameter set of a fixed-size controller MLP,</p>
+  <pre>    8 inputs &rarr; 32 tanh &rarr; 32 tanh &rarr; 8 outputs   (~1,608 parameters)</pre>
+  <p>laid out as a 6&times;32&times;32 tensor (weight matrices as channels, biases in the
+  first column, zeros padded, a validity mask marking real entries). A static
+  mask is fed to the UNet as extra input channels; the training loss and the
+  final decode are masked to valid entries. Weights are z-normalized per tensor
+  with corpus statistics and clamped to &plusmn;4&sigma; so the diffusion process
+  operates in roughly [-1, 1] &mdash; the same regime as image pixels.</p>
+</section>
+
+<section>
+  <h2>2. The synthetic corpus</h2>
+  <p>There is no public dataset of (network, description) pairs, so NNGen
+  manufactures its own:</p>
+  <ol>
+    <li>For each task family, a <strong>batched, fully differentiable
+    mini-environment</strong> simulates the task (chase, evasion, cart-pole,
+    paddle-ball, leg animation, orbital flight, turtle-graphics drawing).</li>
+    <li>Hundreds of controller MLPs are trained <strong>in parallel</strong> through
+    the dynamics with backprop-through-time (a short-to-full episode horizon
+    ramp stabilizes training). A fresh environment seed every optimizer step
+    prevents memorizing a single episode.</li>
+    <li>Every trained network is evaluated on a <strong>held-out episode</strong>;
+    only successful ones join the corpus (quality is recorded and reflected in
+    the caption).</li>
+    <li>Template-based <strong>English captions</strong> describe the behavior and
+    its quality; a frozen MiniLM encoder caches token embeddings for the UNet's
+    cross-attention.</li>
+  </ol>
+  <p>For the drawing demo, the corpus contains eight shapes &mdash; circle, square,
+  triangle, pentagon, star, spiral, line, arc &mdash; while <strong>hexagon and
+  octagon are deliberately excluded</strong> from training. They exist only as
+  evaluation targets: if the generator produces working hexagon-drawers, it has
+  generalized the concept of &ldquo;regular polygon&rdquo; in weight space.</p>
+</section>
+
+<section>
+  <h2>3. The diffusion model — standard techniques, novel target</h2>
+  <p>NNGen uses <strong>the same techniques introduced for image generation</strong>,
+  with one conceptual substitution: the data distribution being learned is not
+  natural images but the weight space of competent controllers. Diffusion
+  models only ever manipulate matrices of numbers &mdash; and a weight matrix is
+  exactly that. No new generative machinery had to be invented; what changed is
+  <em>what the matrix means</em> and <em>how the corpus that teaches its meaning
+  is produced</em>.</p>
+  <table>
+    <tr><th>Component</th><th>Choice</th><th>Why</th></tr>
+    <tr><td>Noise process</td><td>cosine schedule, T=1000 forward steps</td><td>gradual corruption of the weight canvas</td></tr>
+    <tr><td>Denoiser</td><td>UNet (2.3M params, mvp preset), self-attention + text cross-attention</td><td>same backbone family as image diffusion, at CPU scale</td></tr>
+    <tr><td>Parameterization</td><td>v-prediction</td><td>stable targets across all noise levels</td></tr>
+    <tr><td>Text conditioning</td><td>frozen MiniLM token embeddings &rarr; cross-attention; FiLM timestep embedding</td><td>the text-to-image recipe, unchanged</td></tr>
+    <tr><td>Guidance</td><td>classifier-free (10% caption dropout), guidance 3&ndash;5 at sampling</td><td>how strongly to follow the prompt</td></tr>
+    <tr><td>Sampling</td><td>DDIM, 20&ndash;50 deterministic steps</td><td>starts from pure Gaussian noise on the canvas</td></tr>
+  </table>
+  <p>Training loss is the masked v-prediction MSE; an EMA of the weights is kept
+  for sampling. At generation time the UNet receives pure noise on the 6&times;32&times;32
+  canvas plus the prompt embedding, and removes noise step by step until a
+  coherent set of network parameters emerges &mdash; then the canvas is decoded
+  back into a standard <code>nn.Linear</code> MLP and executed.</p>
+</section>
+
+<section>
+  <h2>4. Running the pipeline</h2>
+  <pre>pip install -r requirements.txt
+
+# 1. mass-train controller networks for the drawing corpus
+python -m dnn.corpus.train_controllers \
+    --tasks draw_circle,draw_square,draw_triangle,draw_pentagon,draw_star,draw_spiral,draw_line,draw_arc \
+    --per-task 300 --out data/corpus_draw
+
+# 2. cache text embeddings
+python -m dnn.corpus.embed_captions --corpus data/corpus_draw
+
+# 3. train the generator
+python -m dnn.train_diffusion --config mvp --corpus data/corpus_draw --run runs/draw_mvp
+
+# 4. generate a network from a prompt (CLI)
+python -m dnn.generate --prompt "..." --task draw_hexagon --ckpt runs/draw_mvp/ckpt.pt --out runs/demo
+
+# 5. this website
+python webapp/server.py --port 17656</pre>
+</section>
+
+<section>
+  <h2>5. HTTP API</h2>
+  <p>All URLs are relative, so the site can be mounted behind a reverse proxy
+  at any sub-path (e.g. <code>nngen.agrillo.it</code>).</p>
+  <table>
+    <tr><th>Method</th><th>Path</th><th>Description</th></tr>
+    <tr><td>POST</td><td><code>api/generate</code></td><td>body <code>{"prompt", "task", "guidance", "steps", "seed"}</code> &rarr; <code>{"job": id}</code>. Generation runs in a background worker (one job at a time).</td></tr>
+    <tr><td>GET</td><td><code>api/job/&lt;id&gt;</code></td><td><code>{"status": pending|running|done|error, "result": ...}</code></td></tr>
+    <tr><td>GET</td><td><code>api/tasks</code></td><td>available rollout tasks</td></tr>
+    <tr><td>GET</td><td><code>api/status</code></td><td>model/checkpoint availability</td></tr>
+    <tr><td>GET</td><td><code>artifacts/&lt;job&gt;/behavior.gif</code></td><td>rollout of the generated network; also <code>weights.png</code>, <code>report.json</code></td></tr>
+  </table>
+</section>
+
+<section>
+  <h2>6. Repository layout</h2>
+  <pre>dnn/
+  controller.py        canonical MLP, weight canvas, normalization
+  text_encoder.py      frozen MiniLM wrapper
+  tasks/               mini-environments + draw shapes, registry
+  corpus/              caption templates, batch trainer, storage, embeddings
+  diffusion/           schedule, UNet, DDIM sampler + CFG, EMA
+  train_diffusion.py   training loop (EMA, checkpoints, resume)
+  generate.py          prompt &rarr; network &rarr; rollout &rarr; artifacts
+  eval.py              generated vs teacher vs random benchmark
+webapp/
+  server.py            this website (stdlib HTTP server, port 17656)
+  pages/, static/      pages and assets
+tests/                 canvas round-trip, tasks, diffusion, e2e pipeline</pre>
+</section>
+
+{{footer}}
+</body>
+</html>

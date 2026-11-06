@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NNGen — Demo</title>
+<link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+{{header}}
+
+<section class="hero">
+  <div class="kicker">TEXT&nbsp;&rarr;&nbsp;NEURAL&nbsp;NETWORK&nbsp;GENERATOR</div>
+  <h1>Demo</h1>
+  <p class="lead">Describe a drawing behavior; NNGen generates a brand-new network
+  and runs it on the pen canvas. Shapes marked <em>held-out</em> were never seen
+  during training &mdash; if they work, the model generalized.</p>
+  <p id="model-status" class="status">checking model status&hellip;</p>
+</section>
+
+<section class="demo-grid">
+  <div class="card form-card">
+    <h2>1 &middot; Describe the network</h2>
+    <label for="task">Behavior family</label>
+    <select id="task"></select>
+    <label for="prompt">Prompt (English)</label>
+    <textarea id="prompt" rows="4" placeholder="A tiny MLP drawing agent: it drives a pen on a 2D canvas to trace a closed regular hexagon..."></textarea>
+    <div class="row">
+      <div>
+        <label for="guidance">Guidance</label>
+        <input type="number" id="guidance" value="4.0" min="1" max="10" step="0.5">
+      </div>
+      <div>
+        <label for="steps">DDIM steps</label>
+        <input type="number" id="steps" value="30" min="5" max="60" step="5">
+      </div>
+      <div>
+        <label for="seed">Seed</label>
+        <input type="number" id="seed" value="42">
+      </div>
+    </div>
+    <button id="go" class="button">Generate network &rarr;</button>
+    <p class="hint">Generation runs locally on CPU: ~30&ndash;60&nbsp;s. One job at a time.</p>
+  </div>
+
+  <div class="card result-card">
+    <h2>2 &middot; The generated network</h2>
+    <div id="placeholder" class="placeholder">The rollout of your generated network will appear here.</div>
+    <div id="progress" class="progress" style="display:none">
+      <div class="spinner"></div>
+      <div>
+        <div id="phase">queuing&hellip;</div>
+        <div class="hint">denoising a 6&times;32&times;32 weight canvas with DDIM, then rolling it out</div>
+      </div>
+    </div>
+    <div id="error" class="error" style="display:none"></div>
+    <div id="result" style="display:none">
+      <div class="resline" id="res-score"></div>
+      <div class="resline" id="res-metrics"></div>
+      <img id="gif" class="artifact" alt="behavior rollout">
+      <img id="weights" class="artifact wide" alt="weight canvas heatmap">
+    </div>
+  </div>
+</section>
+
+<script>
+const TASKS = [
+  ["draw_circle", "circle (trained)"],
+  ["draw_square", "square (trained)"],
+  ["draw_triangle", "triangle (trained)"],
+  ["draw_pentagon", "pentagon (trained)"],
+  ["draw_star", "star (trained)"],
+  ["draw_spiral", "spiral (trained)"],
+  ["draw_line", "line (trained)"],
+  ["draw_arc", "arc (trained)"],
+  ["draw_hexagon", "hexagon — HELD OUT, never trained"],
+  ["draw_octagon", "octagon — HELD OUT, never trained"],
+  ["seek", "seek — chase a moving target (other family)"],
+  ["gait", "gait — leg IK animation (other family)"],
+  ["orbit", "orbit — satellite (other family)"],
+];
+const PROMPTS = {
+  draw_circle: "A tiny MLP drawing agent: it drives a pen on a 2D canvas to trace a clean, closed circle.",
+  draw_square: "A tiny MLP drawing agent: it drives a pen on a 2D canvas to trace a crisp square outline.",
+  draw_triangle: "A tiny MLP drawing agent: it drives a pen on a 2D canvas to trace a closed equilateral triangle.",
+  draw_pentagon: "A tiny MLP drawing agent: it drives a pen on a 2D canvas to trace a closed regular pentagon, turning by a fixed angle at each of five corners.",
+  draw_star: "A tiny MLP drawing agent: it drives a pen on a 2D canvas to trace a five-pointed star.",
+  draw_spiral: "A small turtle-graphics network whose pen path winds inward in a steady spiral of the requested size.",
+  draw_line: "A tiny MLP drawing agent: it drives a pen along a straight line, holding its heading steady.",
+  draw_arc: "A tiny MLP drawing agent: it drives a pen on a 2D canvas to trace a smooth half-circle arc.",
+  draw_hexagon: "A tiny MLP drawing agent: it drives a pen on a 2D canvas to trace a closed regular hexagon, turning by a fixed 60-degree angle at each of six corners.",
+  draw_octagon: "A tiny MLP drawing agent: it drives a pen on a 2D canvas to trace a closed regular octagon, turning by a fixed 45-degree angle at each of eight corners.",
+  seek: "A tiny MLP controller for a chase game: it steers a point mass to follow a smoothly moving target across a 2D arena.",
+  gait: "A tiny MLP controller for procedural animation: it drives a two-joint leg so the foot traces a smooth stride ellipse.",
+  orbit: "A tiny MLP controller for a space scene: it thrusts a satellite into a clean circular orbit at the requested radius.",
+};
+
+const taskSel = document.getElementById("task");
+for (const [id, label] of TASKS) {
+  const o = document.createElement("option");
+  o.value = id; o.textContent = label;
+  taskSel.appendChild(o);
+}
+taskSel.value = "draw_hexagon";
+document.getElementById("prompt").value = PROMPTS[taskSel.value];
+taskSel.addEventListener("change", () => {
+  document.getElementById("prompt").value = PROMPTS[taskSel.value] || "";
+});
+
+function setStatus(text, ok) {
+  const el = document.getElementById("model-status");
+  el.textContent = text;
+  el.className = "status " + (ok ? "ok" : "warn");
+}
+fetch("api/status").then(r => r.json()).then(s => {
+  if (s.ready) setStatus("model ready — checkpoint loaded on first job", true);
+  else setStatus("model not available yet: " + (s.error || "checkpoint missing"), false);
+}).catch(() => setStatus("server unreachable", false));
+
+document.getElementById("go").addEventListener("click", async () => {
+  const go = document.getElementById("go");
+  go.disabled = true;
+  document.getElementById("result").style.display = "none";
+  document.getElementById("error").style.display = "none";
+  document.getElementById("placeholder").style.display = "none";
+  document.getElementById("progress").style.display = "flex";
+  document.getElementById("phase").textContent = "queuing\u2026";
+  try {
+    const body = {
+      prompt: document.getElementById("prompt").value,
+      task: taskSel.value,
+      guidance: parseFloat(document.getElementById("guidance").value),
+      steps: parseInt(document.getElementById("steps").value),
+      seed: parseInt(document.getElementById("seed").value),
+    };
+    const r = await fetch("api/generate", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || "request failed");
+    poll(j.job, 0);
+  } catch (e) {
+    showError(e.message);
+  }
+});
+
+function showError(msg) {
+  document.getElementById("progress").style.display = "none";
+  const el = document.getElementById("error");
+  el.textContent = msg;
+  el.style.display = "block";
+  document.getElementById("go").disabled = false;
+}
+
+function poll(job, n) {
+  document.getElementById("phase").textContent =
+    n < 5 ? "denoising the weight canvas (DDIM)\u2026" :
+    n < 12 ? "decoding weights into the controller MLP\u2026" :
+    "rolling out the generated network in its environment\u2026";
+  fetch("api/job/" + job).then(r => r.json()).then(j => {
+    if (j.status === "done") { show(j.result); return; }
+    if (j.status === "error") { showError(j.error); return; }
+    setTimeout(() => poll(job, n + 1), 4000);
+  }).catch(e => showError(e.message));
+}
+
+function show(res) {
+  document.getElementById("progress").style.display = "none";
+  document.getElementById("go").disabled = false;
+  const a = res.artifacts;
+  document.getElementById("res-score").innerHTML =
+    "<strong>" + res.task + "</strong> &mdash; score " + res.score.toFixed(3) +
+    (res.success === null ? "" : (res.success ? " &middot; <span class='ok'>SUCCESS</span>" : " &middot; <span class='warn'>below threshold</span>")));
+  document.getElementById("res-metrics").textContent = Object.entries(res.metrics)
+    .map(([k, v]) => k + "=" + v).join("   ");
+  document.getElementById("gif").src = a.behavior_gif;
+  document.getElementById("weights").src = a.weights_png;
+  document.getElementById("result").style.display = "block";
+}
+</script>
+
+{{footer}}
+</body>
+</html>

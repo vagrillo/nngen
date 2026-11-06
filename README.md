@@ -1,8 +1,11 @@
-# diffusionNN — text-to-network diffusion model
+# NNGen — TEXT to NEURAL NETWORK GENERATOR
 
-A diffusion model with a **text2image architecture** (UNet + text cross-attention +
-classifier-free guidance + v-prediction DDIM) where the "image" being denoised is
-**the weight tensor of a neural network** instead of a picture.
+NNGen is a diffusion model with a **text2image architecture** (UNet + text
+cross-attention + classifier-free guidance + v-prediction DDIM) where the
+"image" being denoised is **the weight tensor of a neural network** instead of
+a picture. Diffusion models learn to denoise matrices of numbers guided by
+text — NNGen applies the same machinery to the weight matrices of working
+networks: describe a behavior, get a model that performs it.
 
 Training pairs mirror the text2image recipe — `(image, caption)` becomes
 `(network, caption)`:
@@ -85,7 +88,7 @@ stays exactly zero. `dnn/controller.py` owns this mapping; round-trip is tested.
 
 ```
 dnn/
-  config.py            fixed sizes + presets (smoke/small/base)
+  config.py            fixed sizes + presets (smoke/mvp/small/base)
   controller.py        canonical MLP, weight canvas, normalization, stats
   text_encoder.py      frozen MiniLM wrapper
   tasks/               base + 6 families + draw shapes, registry
@@ -95,8 +98,25 @@ dnn/
   generate.py          prompt → network → rollout → artifacts
   eval.py              generated vs teacher vs random success table
   render.py            behavior GIFs and weight heatmaps
+webapp/
+  server.py            NNGen website + demo API (stdlib HTTP, port 17656)
+  pages/, static/      English documentation and demo UI
 tests/                 canvas round-trip, tasks, diffusion, pipeline e2e
 ```
+
+## Web demo (NNGen site)
+
+```bash
+python webapp/server.py --port 17656            # then open http://localhost:17656
+```
+
+Standard-library only, all URLs relative → host it behind a reverse proxy at
+any sub-path/domain (e.g. `nngen.agrillo.it`). Endpoints: `POST api/generate`
+(prompt, task, guidance, steps, seed → background job), `GET api/job/<id>`,
+`GET api/status`, `GET api/tasks`, artifacts under `artifacts/<job>/…`.
+The demo generates a network from a prompt and shows the rollout GIF, the
+weight-canvas heatmap and quality metrics. Held-out shapes (hexagon, octagon)
+test compositional generalization.
 
 ## Status / notes
 
