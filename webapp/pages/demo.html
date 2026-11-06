@@ -172,7 +172,7 @@ function show(res) {
   const a = res.artifacts;
   document.getElementById("res-score").innerHTML =
     "<strong>" + res.task + "</strong> &mdash; score " + res.score.toFixed(3) +
-    (res.success === null ? "" : (res.success ? " &middot; <span class='ok'>SUCCESS</span>" : " &middot; <span class='warn'>below threshold</span>")));
+    (res.success === null ? "" : (res.success ? " &middot; <span class='ok'>SUCCESS</span>" : " &middot; <span class='warn'>below threshold</span>"));
   document.getElementById("res-metrics").textContent = Object.entries(res.metrics)
     .map(([k, v]) => k + "=" + v).join("   ");
   document.getElementById("gif").src = a.behavior_gif;
