@@ -52,9 +52,9 @@ class TaskTrainer:
         self.batch = batch
         self.net = BatchedController(batch, seed=0)
 
-        def step(state: dict) -> torch.Tensor:
+        def step(state: dict, horizon: int) -> torch.Tensor:
             states = [state]
-            for _ in range(task.spec.steps):
+            for _ in range(horizon):
                 obs = task.observe(state)
                 action = self.net(obs)
                 state = task.dynamics(state, action)
@@ -69,10 +69,15 @@ class TaskTrainer:
         self.net.reinit_(seed)
         opt = torch.optim.Adam(self.net.parameters(), lr=lr)
         gen = torch.Generator().manual_seed(seed)
+        full = self.task.spec.steps
         for step in range(steps):
+            # Horizon ramp: short rollouts early (stabilizes BPTT through the
+            # dynamics), full episodes once the policy is roughly competent.
+            frac = step / max(1, steps)
+            horizon = 30 if frac < 0.3 else (60 if frac < 0.6 else full)
             state = self.task.reset(self.batch, gen)  # new env instance per step
             opt.zero_grad(set_to_none=True)
-            self._step(state)
+            self._step(state, horizon)
             opt.step()
         with torch.no_grad():
             eval_state = self.task.rollout(self.net, self.batch, seed=(seed + EVAL_SEED_OFFSET) & 0x7FFF_FFFF)
