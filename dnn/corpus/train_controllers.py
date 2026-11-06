@@ -210,6 +210,14 @@ def _renumber(all_metas: list[dict], metas: list[dict]) -> list[dict]:
     return renumbered
 
 
+def safe_worker(payload: dict):
+    """Pool-map wrapper: isolates per-task failures (must be picklable)."""
+    try:
+        return _worker(payload), None
+    except Exception as e:
+        return (payload["task"], torch.zeros(0), []), f"{payload['task']}: {e}"
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--tasks", default="all", help="'all' or comma-separated task names")
@@ -277,13 +285,6 @@ def main() -> None:
                 print(f"[pool] task '{p['task']}' FAILED: {e}", flush=True)
     else:
         ctx = mp.get_context("spawn")
-
-        def safe_worker(p):
-            try:
-                return _worker(p), None
-            except Exception as e:
-                return (p["task"], torch.zeros(0), []), f"{p['task']}: {e}"
-
         with ctx.Pool(processes=min(args.workers, len(pending))) as pool:
             for (name, w, m), err in pool.imap_unordered(safe_worker, payloads):
                 if err:

@@ -56,9 +56,11 @@ def _star(outer: float, inner: float, points: int) -> torch.Tensor:
 
 
 def _spiral(n: int) -> torch.Tensor:
+    # Bounded curvature: outer-to-inner Archimedean spiral with a minimum
+    # radius so the required angular speed stays traceable at fixed step length.
     u_ = torch.linspace(0.0, 1.0, n)
-    r = u_
-    th = 2.5 * 2 * math.pi * u_
+    r = 0.72 - (0.72 - 0.18) * u_
+    th = 2.2 * 2 * math.pi * u_
     return torch.stack([r * torch.cos(th), r * torch.sin(th)], dim=-1)
 
 
@@ -167,7 +169,7 @@ class DrawTask(BaseTask):
         )
 
     def _errors(self, states: list[dict]) -> torch.Tensor:
-        """||pen_i - target_i|| for every state (states[0] is exact). (T+1, B)"""
+        """Point-wise ||pen_i - target_i|| (phase-locked); diagnostics only. (T+1, B)"""
         errs = []
         for st in states:
             idx = st["i"].long().clamp(max=STEPS - 1)
@@ -175,33 +177,61 @@ class DrawTask(BaseTask):
             errs.append((st["pen"] - tgt).norm(dim=-1))
         return torch.stack(errs)
 
+    def _curve_dist(self, states: list[dict]) -> torch.Tensor:
+        """Chamfer distance: pen-to-nearest-target-point at every step. (T+1, B)
+
+        Phase-free: rewards tracing the same curve regardless of where along
+        it the pen is at each step — closed shapes don't need step-aligned
+        phase, which point-wise matching makes brittle under BPTT.
+        """
+        pen = torch.stack([st["pen"] for st in states])            # (T+1, B, 2)
+        tgt = states[0]["target"]                                  # (B, N, 2)
+        d = (pen.unsqueeze(2) - tgt.unsqueeze(0)).norm(dim=-1)     # (T+1, B, N)
+        return d.min(dim=-1).values
+
     def _closure(self, states: list[dict]) -> torch.Tensor:
         return (states[-1]["pen"] - states[-1]["target"][:, 0]).norm(dim=-1)
 
+    def _endpoint(self, states: list[dict]) -> torch.Tensor:
+        return (states[-1]["pen"] - states[-1]["target"][:, -1]).norm(dim=-1)
+
+    def _length_ratio(self, states: list[dict]) -> torch.Tensor:
+        """Total pen path length / target polyline length (per element)."""
+        pen = torch.stack([st["pen"] for st in states])            # (T+1, B, 2)
+        seg = (pen[1:] - pen[:-1]).norm(dim=-1).sum(dim=0)         # (B,)
+        tgt_len = (states[0]["target"][:, 1:] - states[0]["target"][:, :-1]).norm(dim=-1).sum(dim=-1)
+        return seg / tgt_len.clamp_min(1e-6)
+
     def train_loss(self, states: list[dict]) -> torch.Tensor:
-        errs = self._errors(states)[1:]
-        loss = errs.mean()
+        d = self._curve_dist(states)[1:].mean()
+        lr = self._length_ratio(states)
+        loss = d + 0.3 * (lr - 1.0).pow(2).mean()  # keep drawing at target pace
         if self.closed:
             loss = loss + 0.5 * self._closure(states).mean()
+        else:
+            loss = loss + 0.3 * self._endpoint(states).mean()
         return loss
 
     def score(self, states: list[dict]) -> torch.Tensor:
         with torch.no_grad():
-            err = self._errors(states)[1:].mean(dim=0)
-            penalty = 0.3 * self._closure(states) if self.closed else 0.0
-            return torch.exp(-12.0 * (err + penalty))
+            d = self._curve_dist(states)[1:].mean(dim=0)
+            tail = self._closure(states) if self.closed else self._endpoint(states)
+            return torch.exp(-12.0 * (d + 0.3 * tail))
 
     def success(self, states: list[dict]) -> torch.Tensor:
         with torch.no_grad():
-            err = self._errors(states)[1:].mean(dim=0)
-            ok = err < 0.07
-            if self.closed:
-                ok = ok & (self._closure(states) < 0.15)
-            return ok
+            d = self._curve_dist(states)[1:].mean(dim=0)
+            tail = self._closure(states) if self.closed else self._endpoint(states)
+            lr = self._length_ratio(states)
+            return (d < 0.06) & (tail < 0.15) & ((lr - 1.0).abs() < 0.2)
 
     def report(self, states: list[dict]) -> dict[str, float]:
         with torch.no_grad():
-            out = {"trace_err": self._errors(states)[1:].mean().item()}
-            if self.closed:
-                out["closure_err"] = self._closure(states).mean().item()
+            out = {
+                "curve_err": self._curve_dist(states)[1:].mean().item(),
+                "length_ratio": self._length_ratio(states).mean().item(),
+            }
+            out["closure_err" if self.closed else "endpoint_err"] = (
+                self._closure(states) if self.closed else self._endpoint(states)
+            ).mean().item()
             return out
