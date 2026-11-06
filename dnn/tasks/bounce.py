@@ -74,13 +74,14 @@ class BounceTask(BaseTask):
         )
 
     def train_loss(self, states: list[dict]) -> torch.Tensor:
-        """Differentiable proxy: track the ball's x when it approaches the paddle."""
+        """Dense tracking proxy: keep the paddle under the ball's x whenever it
+        descends, with weight growing toward the paddle line."""
         loss = 0.0
         for st in states:
             bx, by = st["bpos"][:, :1], st["bpos"][:, 1:]
             descending = (st["bvel"][:, 1:] < 0).float()
-            proximity = torch.exp(-(((by - 0.15) / 0.2) ** 2))
-            err = (bx - st["px"]).abs() * proximity * descending
+            w = torch.exp(-(((by - 0.12) / 0.4) ** 2)) + 0.2
+            err = (bx - st["px"]).abs() * w * descending
             loss = loss + err.mean()
         return loss / len(states)
 

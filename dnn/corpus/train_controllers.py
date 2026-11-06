@@ -172,6 +172,36 @@ def _worker(payload: dict) -> tuple[str, torch.Tensor, list[dict]]:
     return name, weights, metas
 
 
+# -- incremental per-task cache (crash-resilience) ---------------------------
+def _partial_dir(out: Path) -> Path:
+    d = out.parent / (out.name + "_partial")
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _save_partial(out: Path, name: str, weights: torch.Tensor, metas: list[dict]) -> None:
+    d = _partial_dir(out)
+    save_weights(d / name, weights, metas, ParamStats.from_flat(weights))
+    print(f"[cache] task '{name}' saved to {d / name}", flush=True)
+
+
+def _load_partial(out: Path, name: str) -> tuple[torch.Tensor, list[dict]] | None:
+    d = _partial_dir(out) / name
+    if (d / "weights.safetensors").exists():
+        from safetensors.torch import load_file
+
+        w = load_file(d / "weights.safetensors")["weights"]
+        m = [json.loads(l) for l in open(d / "meta.jsonl")]
+        return w, m
+    return None
+
+
+def _renumber(all_metas: list[dict], metas: list[dict]) -> list[dict]:
+    offset = len(all_metas)
+    renumbered = [{**m, "id": m["id"] + offset} for m in metas]
+    return renumbered
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--tasks", default="all", help="'all' or comma-separated task names")
@@ -183,11 +213,29 @@ def main() -> None:
     ap.add_argument("--workers", type=int, default=3, help="parallel task workers")
     ap.add_argument("--threads-per-worker", type=int, default=2)
     ap.add_argument("--no-compile", action="store_true", help="disable torch.compile (slower, debug)")
+    ap.add_argument("--no-cache", action="store_true", help="ignore per-task partial cache")
     args = ap.parse_args()
 
     names = list(TASKS) if args.tasks == "all" else [t.strip() for t in args.tasks.split(",")]
     for n in names:
         get_task(n)  # validate
+
+    out = Path(args.out)
+    # Skip tasks already cached from a previous (crashed) run.
+    pending, cached = [], []
+    all_weights: list[torch.Tensor] = []
+    all_metas: list[dict] = []
+    for n in names:
+        part = _load_partial(out, n) if not args.no_cache else None
+        if part is not None:
+            w, m = part
+            all_weights.append(w)
+            all_metas.extend(_renumber(all_metas, m))
+            cached.append(n)
+        else:
+            pending.append(n)
+    if cached:
+        print(f"[cache] resuming: {len(cached)} tasks cached ({', '.join(cached)}), {len(pending)} to generate", flush=True)
 
     payloads = [
         {
@@ -199,23 +247,51 @@ def main() -> None:
             "compile": not args.no_compile,
             "threads": args.threads_per_worker,
         }
-        for n in names
+        for n in pending
     ]
 
-    all_weights: list[torch.Tensor] = []
-    all_metas: list[dict] = []
-    if args.workers <= 1 or len(names) == 1:
+    failed: list[str] = []
+    if not payloads:
+        pass  # everything cached
+    elif args.workers <= 1 or len(pending) == 1:
         for p in payloads:
-            _, w, m = _worker(p)
-            all_weights.append(w)
-            all_metas.extend(m)
+            try:
+                _, w, m = _worker(p)
+                _save_partial(out, p["task"], w, m)
+                all_weights.append(w)
+                all_metas.extend(_renumber(all_metas, m))
+            except Exception as e:  # a task that can't hit its quota must not sink the run
+                failed.append(p["task"])
+                print(f"[pool] task '{p['task']}' FAILED: {e}", flush=True)
     else:
         ctx = mp.get_context("spawn")
-        with ctx.Pool(processes=min(args.workers, len(names))) as pool:
-            for name, w, m in pool.imap_unordered(_worker, payloads):
+
+        def safe_worker(p):
+            try:
+                return _worker(p), None
+            except Exception as e:
+                return (p["task"], torch.zeros(0), []), f"{p['task']}: {e}"
+
+        with ctx.Pool(processes=min(args.workers, len(pending))) as pool:
+            for (name, w, m), err in pool.imap_unordered(safe_worker, payloads):
+                if err:
+                    failed.append(name)
+                    print(f"[pool] task '{err}' FAILED", flush=True)
+                    continue
+                _save_partial(out, name, w, m)
                 print(f"[pool] task '{name}' returned {w.shape[0]} networks", flush=True)
                 all_weights.append(w)
-                all_metas.extend(m)
+                all_metas.extend(_renumber(all_metas, m))
+
+    if not all_weights:
+        raise SystemExit("All tasks failed; no corpus written. See logs above.")
+    weights = torch.cat(all_weights)
+    stats = ParamStats.from_flat(weights)
+    root = Path(args.out)
+    save_weights(root, weights, all_metas, stats)
+    print(f"Corpus saved to {root}: {weights.shape[0]} networks, {len(set(m['task'] for m in all_metas))} tasks")
+    if failed:
+        print(f"FAILED TASKS (rerun separately): {', '.join(failed)}")
 
     weights = torch.cat(all_weights)
     stats = ParamStats.from_flat(weights)
