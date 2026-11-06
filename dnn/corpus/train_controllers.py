@@ -141,7 +141,7 @@ def generate_task(
     metas = []
     for i, (flat, score, success, split) in enumerate(kept):
         caption = build_caption(
-            task_name, task.spec.io_desc, float(order[i]), score, seed=_batch_seed(task_name, i, salt="caption")
+            task_name, task.spec.io_desc, float(order[i]), score, seed=_batch_seed(task_name, i, False, salt="caption")
         )
         metas.append(
             {
@@ -151,7 +151,7 @@ def generate_task(
                 "score": round(score, 4),
                 "success": bool(success),
                 "split": split,
-                "seed": _batch_seed(task_name, i, salt="meta"),
+                "seed": _batch_seed(task_name, i, False, salt="meta"),
             }
         )
     print(
