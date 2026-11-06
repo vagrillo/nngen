@@ -81,6 +81,12 @@ def _unit_polyline(shape: str, n: int = STEPS) -> torch.Tensor:
         pts = _resample_closed(_regular_polygon(0.6, 8, math.pi / 8), n)
     elif shape == "star":
         pts = _resample_closed(_star(0.6, 0.24, 5), n)
+    elif shape == "star3":
+        pts = _resample_closed(_star(0.6, 0.24, 3), n)
+    elif shape == "star4":
+        pts = _resample_closed(_star(0.6, 0.24, 4), n)
+    elif shape == "star6":
+        pts = _resample_closed(_star(0.6, 0.24, 6), n)
     elif shape == "spiral":
         # Resample by arclength so steps are uniform like the other shapes.
         pts = _resample(_spiral(400), n)
@@ -94,8 +100,8 @@ def _unit_polyline(shape: str, n: int = STEPS) -> torch.Tensor:
     return pts
 
 
-CLOSED_SHAPES = {"circle", "square", "triangle", "pentagon", "hexagon", "octagon", "star"}
-SHAPE_NAMES = ("circle", "square", "triangle", "pentagon", "star", "spiral", "line", "arc")
+CLOSED_SHAPES = {"circle", "square", "triangle", "pentagon", "hexagon", "octagon", "star", "star3", "star4", "star6"}
+SHAPE_NAMES = ("circle", "square", "triangle", "pentagon", "star", "star3", "star4", "star6", "spiral", "line", "arc")
 # Held-out shapes: registered for eval only, NEVER generated into the corpus.
 HELD_OUT_SHAPES = ("hexagon", "octagon")
 _UNIT_CACHE: dict[str, torch.Tensor] = {}
@@ -189,6 +195,18 @@ class DrawTask(BaseTask):
         d = (pen.unsqueeze(2) - tgt.unsqueeze(0)).norm(dim=-1)     # (T+1, B, N)
         return d.min(dim=-1).values
 
+    def _coverage(self, states: list[dict]) -> torch.Tensor:
+        """Reverse chamfer: for every TARGET point, distance to the nearest pen
+        visit over time. (B,) Kills the degenerate 'wiggle on one curve point'
+        solution: sitting on a single vertex leaves the rest of the curve
+        uncovered. (N, T+1, B) pairwise, min over time.
+        """
+        pen = torch.stack([st["pen"] for st in states])            # (T+1, B, 2)
+        tgt = states[0]["target"]                                  # (B, N, 2)
+        pen_visit = pen.permute(1, 0, 2).unsqueeze(1)              # (B, 1, T+1, 2)
+        d = (tgt.unsqueeze(2) - pen_visit).norm(dim=-1)            # (B, N, T+1)
+        return d.min(dim=-1).values.mean(dim=-1)                   # (B,)
+
     def _closure(self, states: list[dict]) -> torch.Tensor:
         return (states[-1]["pen"] - states[-1]["target"][:, 0]).norm(dim=-1)
 
@@ -204,8 +222,9 @@ class DrawTask(BaseTask):
 
     def train_loss(self, states: list[dict]) -> torch.Tensor:
         d = self._curve_dist(states)[1:].mean()
+        cov = self._coverage(states).mean()
         lr = self._length_ratio(states)
-        loss = d + 0.3 * (lr - 1.0).pow(2).mean()  # keep drawing at target pace
+        loss = d + 0.5 * cov + 0.3 * (lr - 1.0).pow(2).mean()  # accuracy + coverage + pace
         if self.closed:
             loss = loss + 0.5 * self._closure(states).mean()
         else:
@@ -215,20 +234,23 @@ class DrawTask(BaseTask):
     def score(self, states: list[dict]) -> torch.Tensor:
         with torch.no_grad():
             d = self._curve_dist(states)[1:].mean(dim=0)
+            cov = self._coverage(states)
             tail = self._closure(states) if self.closed else self._endpoint(states)
-            return torch.exp(-12.0 * (d + 0.3 * tail))
+            return torch.exp(-12.0 * (d + 0.3 * cov + 0.3 * tail))
 
     def success(self, states: list[dict]) -> torch.Tensor:
         with torch.no_grad():
             d = self._curve_dist(states)[1:].mean(dim=0)
+            cov = self._coverage(states)
             tail = self._closure(states) if self.closed else self._endpoint(states)
             lr = self._length_ratio(states)
-            return (d < 0.06) & (tail < 0.15) & ((lr - 1.0).abs() < 0.2)
+            return (d < 0.06) & (cov < 0.07) & (tail < 0.15) & ((lr - 1.0).abs() < 0.2)
 
     def report(self, states: list[dict]) -> dict[str, float]:
         with torch.no_grad():
             out = {
                 "curve_err": self._curve_dist(states)[1:].mean().item(),
+                "coverage_err": self._coverage(states).mean().item(),
                 "length_ratio": self._length_ratio(states).mean().item(),
             }
             out["closure_err" if self.closed else "endpoint_err"] = (

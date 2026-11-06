@@ -81,6 +81,27 @@ LEADS: dict[str, list[str]] = {
         "A drawing-robot policy: from pen pose alone it produces the turn and step commands of a star polygon.",
         "A tiny policy network for procedural drawing: it inks a closed five-point star from a standing start.",
     ],
+    "draw_star3": [
+        "A tiny MLP drawing agent: it drives a pen on a 2D canvas to trace a three-pointed star.",
+        "A small turtle-graphics network whose pen path zig-zags through the six vertices of a three-point star and closes it.",
+        "A sketching controller that draws a star with exactly three points, turning sharply at each tip.",
+        "A drawing-robot policy: from pen pose alone it produces the turn and step commands of a three-pointed star polygon.",
+        "A tiny policy network for procedural drawing: it inks a closed three-point star from a standing start.",
+    ],
+    "draw_star4": [
+        "A tiny MLP drawing agent: it drives a pen on a 2D canvas to trace a four-pointed star.",
+        "A small turtle-graphics network whose pen path zig-zags through the eight vertices of a four-point star and closes it.",
+        "A sketching controller that draws a star with exactly four points, turning sharply at each tip.",
+        "A drawing-robot policy: from pen pose alone it produces the turn and step commands of a four-pointed star polygon.",
+        "A tiny policy network for procedural drawing: it inks a closed four-point star from a standing start.",
+    ],
+    "draw_star6": [
+        "A tiny MLP drawing agent: it drives a pen on a 2D canvas to trace a six-pointed star.",
+        "A small turtle-graphics network whose pen path zig-zags through the twelve vertices of a six-point star and closes it.",
+        "A sketching controller that draws a star with exactly six points, turning sharply at each tip.",
+        "A drawing-robot policy: from pen pose alone it produces the turn and step commands of a six-pointed star polygon.",
+        "A tiny policy network for procedural drawing: it inks a closed six-point star from a standing start.",
+    ],
     "draw_pentagon": [
         "A tiny MLP drawing agent: it drives a pen on a 2D canvas to trace a closed regular pentagon.",
         "A small turtle-graphics network whose pen path turns by a fixed 72-degree angle at each of five corners.",
