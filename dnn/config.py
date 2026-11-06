@@ -79,6 +79,13 @@ PRESETS: dict[str, Preset] = {
         DiffusionConfig(base_channels=24, channel_mults=(1, 2, 4), time_dim=128),
         TrainConfig(steps=800, batch_size=32, val_every=200, ckpt_every=400),
     ),
+    # MVP: single cross-attention at 8x8 (receptive field covers the whole
+    # canvas), sized for real training on CPU-only boxes.
+    "mvp": Preset(
+        "mvp",
+        DiffusionConfig(base_channels=24, channel_mults=(1, 2, 4), attn_resolutions=(8,), time_dim=128),
+        TrainConfig(steps=1_500, batch_size=24, lr=2e-4, warmup=100, val_every=250, ckpt_every=500),
+    ),
     # Primary CPU configuration (~a few hours).
     "small": Preset(
         "small",
