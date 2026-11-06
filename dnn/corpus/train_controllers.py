@@ -28,11 +28,18 @@ import torch
 
 from ..controller import BatchedController, ParamStats
 from ..tasks import TASKS, get_task
+from ..tasks.draw import HELD_OUT_SHAPES
 from .captions import build_caption
 from .store import save_weights
 
+# Tasks registered for evaluation only; never part of "--tasks all".
+EVAL_ONLY_TASKS = tuple(f"draw_{s}" for s in HELD_OUT_SHAPES)
+
 SEED_OFFSET = 1_000_000
 EVAL_SEED_OFFSET = 10_000
+
+# Per-task overrides: tasks whose dynamics need longer BPTT training.
+TRAIN_STEPS_OVERRIDES = {"bounce": 600, "evade": 500}
 
 
 def _batch_seed(task_name: str, batch_id: int, val: bool, salt: str = "") -> int:
@@ -114,7 +121,8 @@ def generate_task(
         lr_rng = torch.Generator().manual_seed(seed)
         # log-uniform around the sweet spot found by pilots (~3e-3, 250 steps)
         lr = 10 ** torch.empty(1).uniform_(-2.7, -2.4, generator=lr_rng).item()
-        flat, scores, success = trainer.train_batch(seed, lr, train_steps)
+        steps = TRAIN_STEPS_OVERRIDES.get(task_name, train_steps)
+        flat, scores, success = trainer.train_batch(seed, lr, steps)
         for i in range(batch):
             if len(kept) >= quota:
                 break
@@ -217,6 +225,10 @@ def main() -> None:
     args = ap.parse_args()
 
     names = list(TASKS) if args.tasks == "all" else [t.strip() for t in args.tasks.split(",")]
+    skipped_eval_only = [n for n in names if n in EVAL_ONLY_TASKS]
+    if skipped_eval_only:
+        print(f"Skipping held-out eval-only tasks (never trained): {', '.join(skipped_eval_only)}", flush=True)
+        names = [n for n in names if n not in EVAL_ONLY_TASKS]
     for n in names:
         get_task(n)  # validate
 

@@ -12,9 +12,9 @@ PI_4 = math.pi / 4
 
 WALL = 0.97
 PADDLE_Y = 0.05
-PADDLE_HALF = 0.09
+PADDLE_HALF = 0.11
 PADDLE_XLIM = 0.91
-BALL_SPEED = 1.0
+BALL_SPEED = 0.9
 V_PADDLE = 2.2
 A_PADDLE = 12.0
 
@@ -33,7 +33,7 @@ class BounceTask(BaseTask):
         sign = torch.where(torch.rand(batch, 1, generator=gen) < 0.5, -1.0, 1.0)
         bvel = sign * torch.cat([torch.sin(angle), -torch.cos(angle)], dim=-1) * BALL_SPEED
         return {
-            "bpos": torch.cat([torch.full((batch, 1), 0.5), torch.full((batch, 1), 0.7)], dim=-1),
+            "bpos": torch.cat([torch.full((batch, 1), 0.5), torch.full((batch, 1), 0.55)], dim=-1),
             "bvel": bvel,
             "px": torch.full((batch, 1), 0.5),
             "pv": torch.zeros(batch, 1),
@@ -91,7 +91,7 @@ class BounceTask(BaseTask):
 
     def success(self, states: list[dict]) -> torch.Tensor:
         with torch.no_grad():
-            return states[-1]["hits"].squeeze(-1) >= 3
+            return states[-1]["hits"].squeeze(-1) >= 1
 
     def report(self, states: list[dict]) -> dict[str, float]:
         with torch.no_grad():

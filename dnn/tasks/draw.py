@@ -71,18 +71,31 @@ def _unit_polyline(shape: str, n: int = STEPS) -> torch.Tensor:
         pts = _resample_closed(_regular_polygon(2 ** 0.5 / 2, 4, math.pi / 4), n)
     elif shape == "triangle":
         pts = _resample_closed(_regular_polygon(0.6, 3, math.pi / 2), n)
+    elif shape == "pentagon":
+        pts = _resample_closed(_regular_polygon(0.6, 5, math.pi / 2), n)
+    elif shape == "hexagon":
+        pts = _resample_closed(_regular_polygon(0.6, 6, 0.0), n)
+    elif shape == "octagon":
+        pts = _resample_closed(_regular_polygon(0.6, 8, math.pi / 8), n)
     elif shape == "star":
         pts = _resample_closed(_star(0.6, 0.24, 5), n)
     elif shape == "spiral":
         # Resample by arclength so steps are uniform like the other shapes.
         pts = _resample(_spiral(400), n)
+    elif shape == "line":
+        pts = torch.stack([torch.linspace(-0.5, 0.5, n), torch.zeros(n)], dim=-1)
+    elif shape == "arc":
+        th = torch.linspace(math.pi, 2 * math.pi, n)  # upper half circle
+        pts = 0.6 * torch.stack([torch.cos(th), torch.sin(th)], dim=-1)
     else:
         raise ValueError(f"Unknown draw shape '{shape}'")
     return pts
 
 
-CLOSED_SHAPES = {"circle", "square", "triangle", "star"}
-SHAPE_NAMES = ("circle", "square", "triangle", "star", "spiral")
+CLOSED_SHAPES = {"circle", "square", "triangle", "pentagon", "hexagon", "octagon", "star"}
+SHAPE_NAMES = ("circle", "square", "triangle", "pentagon", "star", "spiral", "line", "arc")
+# Held-out shapes: registered for eval only, NEVER generated into the corpus.
+HELD_OUT_SHAPES = ("hexagon", "octagon")
 _UNIT_CACHE: dict[str, torch.Tensor] = {}
 
 

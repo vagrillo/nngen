@@ -5,7 +5,7 @@ from __future__ import annotations
 from .balance import BalanceTask
 from .base import BaseTask, TaskSpec
 from .bounce import BounceTask
-from .draw import DrawTask, SHAPE_NAMES
+from .draw import DrawTask, HELD_OUT_SHAPES, SHAPE_NAMES
 from .evade import EvadeTask
 from .gait import GaitTask
 from .orbit import OrbitTask
@@ -20,11 +20,12 @@ _TASK_CLASSES = {
     "orbit": OrbitTask,
 }
 _DRAW_SHAPES = SHAPE_NAMES
+_DRAW_HELD_OUT = HELD_OUT_SHAPES
 
 
 def build_registry() -> dict[str, BaseTask]:
     reg: dict[str, BaseTask] = {name: cls() for name, cls in _TASK_CLASSES.items()}
-    for shape in _DRAW_SHAPES:
+    for shape in _DRAW_SHAPES + _DRAW_HELD_OUT:
         task = DrawTask(shape)
         reg[task.spec.name] = task
     return reg

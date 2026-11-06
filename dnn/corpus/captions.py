@@ -81,6 +81,27 @@ LEADS: dict[str, list[str]] = {
         "A drawing-robot policy: from pen pose alone it produces the turn and step commands of a star polygon.",
         "A tiny policy network for procedural drawing: it inks a closed five-point star from a standing start.",
     ],
+    "draw_pentagon": [
+        "A tiny MLP drawing agent: it drives a pen on a 2D canvas to trace a closed regular pentagon.",
+        "A small turtle-graphics network whose pen path turns by a fixed 72-degree angle at each of five corners.",
+        "A sketching controller that walks a pen around a five-sided polygon, turning the same amount at every vertex.",
+        "A drawing-robot policy: from pen pose alone it produces the constant turn and step commands of a pentagon.",
+        "A tiny policy network for procedural drawing: it inks a closed five-sided regular polygon.",
+    ],
+    "draw_line": [
+        "A tiny MLP drawing agent: it drives a pen on a 2D canvas along a straight line of the requested length.",
+        "A small turtle-graphics network whose pen path is a single straight segment, held steady without turning.",
+        "A sketching controller that keeps a pen on course, drawing one clean straight stroke.",
+        "A drawing-robot policy: from pen pose alone it produces near-zero turns and constant steps along a line.",
+        "A tiny policy network for procedural drawing: it inks a straight horizontal stroke from a standing start.",
+    ],
+    "draw_arc": [
+        "A tiny MLP drawing agent: it drives a pen on a 2D canvas to trace a smooth half-circle arc.",
+        "A small turtle-graphics network whose pen path curves steadily through a semicircle of the requested size.",
+        "A sketching controller that turns the pen at a constant rate to draw a half-circle arc.",
+        "A drawing-robot policy: from pen pose alone it produces the continuous turning commands of an arc.",
+        "A tiny policy network for procedural drawing: it inks a constant-curvature half-circle stroke.",
+    ],
     "draw_spiral": [
         "A tiny MLP drawing agent: it drives a pen on a 2D canvas to trace a smooth Archimedean spiral.",
         "A small turtle-graphics network whose pen path winds inward in a steady spiral of the requested size.",
