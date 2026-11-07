@@ -186,6 +186,28 @@ scripts/               demos and utilities
 - Success is measured, not promised: `eval.py` reports generated networks
   against their corpus teachers and random initialization on unseen captions.
 
+## Related work
+
+This project sits in the emerging field the survey
+***"A Survey of Weight Space Learning: Understanding, Representation, and
+Generation"*** ([arXiv:2603.10090](https://arxiv.org/pdf/2603.10090)) calls
+**Weight Space Generation**. Section [**4.2.1 — Conditional Weight
+Generation**](https://arxiv.org/pdf/2603.10090) describes exactly the family
+of approaches NNGen belongs to: synthesizing model parameters specialized for
+a task or semantic condition — instead of learning one static set of weights —
+so that "model behavior" becomes semantically controllable. The survey cites
+text-conditioned generators such as **T2W** (a diffusion transformer producing
+classifier heads from CLIP text embeddings) and **HyperLDM** (diffusion
+conditioned on CLIP features).
+
+NNGen differs in where the conditioning power comes from: rather than
+generating a classifier head for an existing feature space, it generates
+**complete small controllers for interactive behaviors** (games, animation,
+drawing) whose training corpus is manufactured end-to-end by the system
+itself — differentiable mini-environments, automatic quality filtering, and
+template captions — so the text→weights mapping can be learned and evaluated
+without any human-labeled data.
+
 ## The point
 
 Diffusion models only ever manipulate matrices of numbers — and a weight
