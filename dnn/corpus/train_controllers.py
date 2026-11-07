@@ -42,7 +42,12 @@ EVAL_SEED_OFFSET = 10_000
 TRAIN_STEPS_OVERRIDES = {
     "bounce": 600,
     "evade": 500,
-    **{f"draw_{s}": 1200 for s in ("circle", "square", "triangle", "pentagon", "star", "star4", "star6", "spiral", "line", "arc")},
+    **{
+        f"draw_{s}": 1200
+        for s in ("circle", "square", "pentagon", "star", "star6", "spiral", "line", "arc")
+    },
+    "draw_triangle": 1800,
+    "draw_star4": 2000,
 }
 
 
