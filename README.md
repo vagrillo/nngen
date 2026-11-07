@@ -1,5 +1,7 @@
 # GenAIGenAI — When AI Generates Generative AI
 
+<img width="653" height="473" alt="image" src="https://github.com/user-attachments/assets/ec9cbb96-6cc8-4140-abdc-2a6bec5a8112" />
+
 **NNGen** is a generator of generative models: a diffusion model with a
 text-to-image architecture that, **instead of generating images, generates a
 GenAI model** — a working neural network whose weights it denoises from pure
