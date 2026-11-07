@@ -8,3 +8,4 @@ data/corpus_draw/*
 runs/
 *.gif
 .zcode/
+data/corpus_draw_partial/
