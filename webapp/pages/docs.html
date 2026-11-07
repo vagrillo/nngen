@@ -107,7 +107,7 @@ python webapp/server.py --port 17656</pre>
 <section>
   <h2>5. HTTP API</h2>
   <p>All URLs are relative, so the site can be mounted behind a reverse proxy
-  at any sub-path (e.g. <code>nngen.agrillo.it</code>).</p>
+  at any sub-path or custom domain.</p>
   <table>
     <tr><th>Method</th><th>Path</th><th>Description</th></tr>
     <tr><td>POST</td><td><code>api/generate</code></td><td>body <code>{"prompt", "task", "guidance", "steps", "seed"}</code> &rarr; <code>{"job": id}</code>. Generation runs in a background worker (one job at a time).</td></tr>
