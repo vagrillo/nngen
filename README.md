@@ -82,27 +82,64 @@ JSON API (`POST api/generate`, `GET api/job/<id>`, `GET api/status`).
 ## Running the pipeline
 
 ```bash
+## Pretrained generator & dataset (included)
+
+The repository ships with everything needed to run and reproduce the drawing
+experiment without re-training from scratch:
+
+| file | what it is | size |
+|---|---|---|
+| `weights/nngen_draw_mvp.safetensors` | the trained diffusion generator (EMA UNet weights, 2.3M params, v-prediction) | ~9 MB |
+| `data/corpus_draw/weights.safetensors` | the full training corpus: 2,916 controller networks (raw flat weights) | ~19 MB |
+| `data/corpus_draw/meta.jsonl` | one record per network: task, English caption, rollout score, success, split | ~1 MB |
+| `data/corpus_draw/stats.json` | per-tensor normalization statistics used by the weight canvas | <1 KB |
+
+The cached MiniLM token embeddings are not included (~143 MB); regenerate them
+deterministically from the captions with the command below. Full training
+checkpoints (model + optimizer + EMA) are also not included — the slim release
+file is what inference needs.
+
+With a fresh clone, this works out of the box:
+
+```bash
+python -m dnn.generate \
+  --prompt "A tiny MLP drawing agent: it drives a pen on a 2D canvas to trace a closed regular hexagon." \
+  --task draw_hexagon            # checkpoint auto-resolves to the release weights
+```
+
+## Running the pipeline (reproduce end-to-end)
+
+```bash
 pip install -r requirements.txt
 
 # 1. mass-train controllers through the differentiable environments
+#    (~2-3 h on 8 CPU cores; deterministic seeds per task/batch)
 python -m dnn.corpus.train_controllers --tasks draw_circle,draw_square,draw_triangle,draw_pentagon,draw_star,draw_star6,draw_spiral,draw_line,draw_arc \
     --per-task 300 --out data/corpus_draw
 
-# 2. cache text embeddings (one-time MiniLM download)
+# 2. cache text embeddings (one-time MiniLM download, ~1 min)
 python -m dnn.corpus.embed_captions --corpus data/corpus_draw
 
-# 3. train the generator (mvp preset = CPU-feasible)
+# 3. train the generator (mvp preset = CPU-feasible: ~3.5 h on 8 cores, 1500 steps)
 python -m dnn.train_diffusion --config mvp --corpus data/corpus_draw --run runs/draw_mvp
 
-# 4. generate a network from a prompt (CLI)
+# 4. generate a network from a prompt (CLI) — writes net + GIF + report
 python -m dnn.generate --prompt "..." --task draw_hexagon --ckpt runs/draw_mvp/ckpt.pt --out runs/demo
 
-# 5. quantitative eval: generated vs teacher vs random
+# 5. quantitative eval: generated vs teacher vs random on validation captions
 python -m dnn.eval --ckpt runs/draw_mvp/ckpt.pt
 
 # 6. the website
 python webapp/server.py --port 17656
+
+# export a slim release checkpoint like the one shipped in weights/
+python scripts/export_release.py --ckpt runs/draw_mvp/ckpt.pt --out weights/nngen_draw_mvp.safetensors
 ```
+
+Step 1 keeps only networks that trace their whole curve on a held-out episode
+(point accuracy, full-curve coverage, closure and pace); failed candidates are
+discarded and the trainer's retry budget absorbs the pass-rate. Step 3's
+validation loss and step 5's benchmark are the objective measures of progress.
 
 ## Repository layout
 

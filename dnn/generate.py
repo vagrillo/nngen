@@ -59,11 +59,22 @@ def canvas_to_controller(canvas: torch.Tensor, stats: ParamStats) -> Controller:
     return controller_from_flat(flat)
 
 
+def _default_ckpt() -> str:
+    here = Path(__file__).resolve().parent
+    for cand in (
+        here.parent / "runs" / "draw_mvp" / "ckpt.pt",
+        here.parent / "weights" / "nngen_draw_mvp.safetensors",
+    ):
+        if cand.exists():
+            return str(cand)
+    return "runs/draw_mvp/ckpt.pt"
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--prompt", required=True)
     ap.add_argument("--task", default=None, help=f"task for rollout/render: {', '.join(task_names())}")
-    ap.add_argument("--ckpt", default="runs/small/ckpt.pt")
+    ap.add_argument("--ckpt", default=None, help="run dir / ckpt.pt / release .safetensors (auto if omitted)")
     ap.add_argument("--guidance", type=float, default=4.0)
     ap.add_argument("--steps", type=int, default=50)
     ap.add_argument("--seed", type=int, default=42)
@@ -75,11 +86,12 @@ def main() -> None:
     if task_name is None:
         raise SystemExit("--task is required (which environment should run the generated network?)")
     task = get_task(task_name)
+    ckpt_path = args.ckpt or _default_ckpt()
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
-    canvas, stats, info = generate_canvas(args.prompt, args.ckpt, args.guidance, args.steps, args.seed)
+    canvas, stats, info = generate_canvas(args.prompt, ckpt_path, args.guidance, args.steps, args.seed)
     net = canvas_to_controller(canvas, stats)
 
     # Evaluate on a held-out episode seed.

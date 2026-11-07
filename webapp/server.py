@@ -44,7 +44,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 PORT = 17656
-CHECKPOINT = ROOT / "runs" / "draw_mvp" / "ckpt.pt"
+# Prefer a locally-trained checkpoint; fall back to the release weights that
+# ship with the repository so a fresh clone works out of the box.
+_CKPT_RUN = ROOT / "runs" / "draw_mvp" / "ckpt.pt"
+_CKPT_RELEASE = ROOT / "weights" / "nngen_draw_mvp.safetensors"
+CHECKPOINT = _CKPT_RUN if _CKPT_RUN.exists() else _CKPT_RELEASE
 
 # ---------------------------------------------------------------------------
 # Generation worker: one job at a time (CPU-bound), results under ARTIFACTS.

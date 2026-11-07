@@ -53,10 +53,30 @@ def save_checkpoint(
 
 
 def load_checkpoint(path: str | Path) -> dict:
-    """Load a checkpoint from a run directory or a ckpt.pt file path."""
+    """Load a checkpoint from a run directory, a ckpt.pt file, or a slim
+    release .safetensors (EMA weights + metadata, see scripts/export_release.py)."""
     p = Path(path)
     if p.is_dir():
         p = p / CKPT_FILE
+    if p.suffix == ".safetensors":
+        from safetensors.torch import load_file
+
+        raw = load_file(str(p))
+        meta = {}
+        try:  # safetensors exposes file metadata via safe_open
+            from safetensors import safe_open
+
+            with safe_open(str(p), framework="pt") as f:
+                meta = f.metadata() or {}
+        except Exception:
+            meta = {}
+        return {
+            "ema": {k: v.float() for k, v in raw.items()},
+            "step": int(meta.get("step", -1)),
+            "model_cfg": json.loads(meta.get("model_cfg", "{}")),
+            "stats": json.loads(meta.get("stats", "{}")),
+            "corpus": meta.get("corpus", ""),
+        }
     return torch.load(p, map_location="cpu", weights_only=False)
 
 

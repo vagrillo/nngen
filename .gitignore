@@ -1,7 +1,10 @@
 __pycache__/
 *.pyc
 .pytest_cache/
-data/corpus*/
+data/corpus_draw/*
+!data/corpus_draw/weights.safetensors
+!data/corpus_draw/meta.jsonl
+!data/corpus_draw/stats.json
 runs/
 *.gif
 .zcode/
