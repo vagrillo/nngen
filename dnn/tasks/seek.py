@@ -53,7 +53,7 @@ class SeekTask(BaseTask):
     def _dists(self, states: list[dict]) -> torch.Tensor:
         return torch.stack([dist(st["pos"], self.target(st)[0]) for st in states])  # (T+1, B)
 
-    def train_loss(self, states: list[dict]) -> torch.Tensor:
+    def train_loss(self, states: list[dict], w_pointwise: float = 0.0) -> torch.Tensor:
         return self._dists(states).mean()
 
     def score(self, states: list[dict]) -> torch.Tensor:

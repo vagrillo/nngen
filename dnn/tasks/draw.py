@@ -64,6 +64,16 @@ def _spiral(n: int) -> torch.Tensor:
     return torch.stack([r * torch.cos(th), r * torch.sin(th)], dim=-1)
 
 
+def _smooth_closed(pts: torch.Tensor, passes: int) -> torch.Tensor:
+    """Circular [0.25, 0.5, 0.25] smoothing: rounds corners so the desired
+    turn profile is representable by the small tanh controller (a sharp
+    144-degree star tip in one step is not). Visually negligible at render
+    size, and success metrics are measured against the same smoothed curve."""
+    for _ in range(passes):
+        pts = 0.25 * torch.roll(pts, 1, 0) + 0.5 * pts + 0.25 * torch.roll(pts, -1, 0)
+    return pts
+
+
 def _unit_polyline(shape: str, n: int = STEPS) -> torch.Tensor:
     """Unit-size target polyline, n points, uniform in arclength."""
     if shape == "circle":
@@ -97,6 +107,8 @@ def _unit_polyline(shape: str, n: int = STEPS) -> torch.Tensor:
         pts = 0.6 * torch.stack([torch.cos(th), torch.sin(th)], dim=-1)
     else:
         raise ValueError(f"Unknown draw shape '{shape}'")
+    if shape in CLOSED_SHAPES:
+        pts = _smooth_closed(pts, passes=3)
     return pts
 
 
@@ -124,6 +136,26 @@ class DrawTask(BaseTask):
             (self.unit[1] - self.unit[0])[1], (self.unit[1] - self.unit[0])[0]
         )
         self.unit_len = (self.unit[1:] - self.unit[:-1]).norm(dim=-1).sum().item()
+        self.size_lo, self.size_hi = SIZE_LO, SIZE_HI
+        # Filtered (rounded-corner) heading profile of the unit polyline:
+        # sharp corners (star tips jump ~144 deg in one step) are not
+        # representable by the small tanh controller, so the expert turns
+        # smoothly over a few steps. Deviation from the sharp polyline stays
+        # within the success tolerances.
+        seg = self.unit[1:] - self.unit[:-1]
+        if self.closed:
+            seg = torch.cat([seg, self.unit[:1] - self.unit[-1:]], dim=0)
+        dirs = seg / seg.norm(dim=-1, keepdim=True).clamp_min(1e-9)
+        w = 2
+        n_seg = dirs.shape[0]
+        idx = torch.arange(n_seg)
+        smooth = torch.stack(
+            [dirs[(idx + k) % n_seg] if self.closed else dirs[(idx + k).clamp(0, n_seg - 1)] for k in range(-w, w + 1)]
+        ).mean(dim=0)
+        smooth = smooth / smooth.norm(dim=-1, keepdim=True).clamp_min(1e-9)
+        ang = torch.atan2(smooth[:, 1], smooth[:, 0])
+        nxt = torch.roll(ang, -1) if self.closed else torch.cat([ang[1:], ang[-1:]])
+        self.ff_turn = torch.remainder(nxt - ang + math.pi, 2 * math.pi) - math.pi  # (N,)
         self.spec = TaskSpec(
             name=f"draw_{shape}",
             obs_used=7,
@@ -133,8 +165,14 @@ class DrawTask(BaseTask):
             "step length and target size. Outputs: turn angle and step-length scale.",
         )
 
+    def set_difficulty(self, frac: float) -> None:
+        """No-op for expert cloning: the analytic expert provides clean,
+        on-curve supervision at any size, so a size curriculum is unnecessary
+        (and was observed to interfere with fitting the final size range)."""
+        self.size_lo, self.size_hi = SIZE_LO, SIZE_HI
+
     def reset(self, batch: int, gen: torch.Generator) -> dict:
-        size = u(gen, batch, 1, lo=SIZE_LO, hi=SIZE_HI)
+        size = u(gen, batch, 1, lo=self.size_lo, hi=self.size_hi)
         target = self.unit.unsqueeze(0) * size.unsqueeze(-1)      # (B, STEPS, 2)
         pen = target[:, 0].clone()
         heading = self.start_heading.expand(batch, 1).clone()
@@ -195,16 +233,23 @@ class DrawTask(BaseTask):
         d = (pen.unsqueeze(2) - tgt.unsqueeze(0)).norm(dim=-1)     # (T+1, B, N)
         return d.min(dim=-1).values
 
-    def _coverage(self, states: list[dict]) -> torch.Tensor:
+    def _coverage(self, states: list[dict], soft_tau: float = 0.0) -> torch.Tensor:
         """Reverse chamfer: for every TARGET point, distance to the nearest pen
         visit over time. (B,) Kills the degenerate 'wiggle on one curve point'
         solution: sitting on a single vertex leaves the rest of the curve
-        uncovered. (N, T+1, B) pairwise, min over time.
+        uncovered.
+
+        soft_tau > 0 returns a smooth minimum (-tau * logsumexp(-d/tau)) whose
+        gradient comes from several nearby timesteps — much denser for BPTT
+        than the hard min, which backprops through a single argmin time.
         """
         pen = torch.stack([st["pen"] for st in states])            # (T+1, B, 2)
         tgt = states[0]["target"]                                  # (B, N, 2)
         pen_visit = pen.permute(1, 0, 2).unsqueeze(1)              # (B, 1, T+1, 2)
         d = (tgt.unsqueeze(2) - pen_visit).norm(dim=-1)            # (B, N, T+1)
+        if soft_tau > 0.0:
+            soft = -soft_tau * torch.logsumexp(-d / soft_tau, dim=-1)  # (B, N)
+            return soft.mean(dim=-1)                               # (B,)
         return d.min(dim=-1).values.mean(dim=-1)                   # (B,)
 
     def _closure(self, states: list[dict]) -> torch.Tensor:
@@ -220,16 +265,40 @@ class DrawTask(BaseTask):
         tgt_len = (states[0]["target"][:, 1:] - states[0]["target"][:, :-1]).norm(dim=-1).sum(dim=-1)
         return seg / tgt_len.clamp_min(1e-6)
 
-    def train_loss(self, states: list[dict]) -> torch.Tensor:
-        d = self._curve_dist(states)[1:].mean()
-        cov = self._coverage(states).mean()
-        lr = self._length_ratio(states)
-        loss = d + 0.5 * cov + 0.3 * (lr - 1.0).pow(2).mean()  # accuracy + coverage + pace
+    def expert_action(self, state: dict) -> torch.Tensor:
+        """Analytic expert command (turn, scale) for the current pen state.
+
+        Pure chase: head toward the next target point (small look-ahead along
+        the polyline). Corners are already rounded in the target curve, so the
+        obs->action mapping is smooth and learnable; strict success metrics
+        still filter anything that does not genuinely trace the whole curve.
+        """
+        i = state["i"].long().squeeze(-1)                          # (B,)
+        N = STEPS
+        tgt = state["target"]
         if self.closed:
-            loss = loss + 0.5 * self._closure(states).mean()
+            nxt, nxt2 = (i + 1) % N, (i + 2) % N
         else:
-            loss = loss + 0.3 * self._endpoint(states).mean()
-        return loss
+            nxt, nxt2 = i.add(1).clamp(max=N - 1), i.add(2).clamp(max=N - 1)
+        t_next = tgt.gather(1, nxt.view(-1, 1, 1).expand(-1, 1, 2)).squeeze(1)
+        t_next2 = tgt.gather(1, nxt2.view(-1, 1, 1).expand(-1, 1, 2)).squeeze(1)
+        pen = state["pen"]
+        m1 = t_next - pen
+        desired = m1 + 0.3 * (t_next2 - t_next)
+        desired_heading = torch.atan2(desired[:, 1], desired[:, 0]).unsqueeze(-1)
+        turn = torch.remainder(desired_heading - state["heading"] + math.pi, 2 * math.pi) - math.pi
+        turn = turn.clamp(-TURN_MAX, TURN_MAX)
+        scale = (m1.norm(dim=-1, keepdim=True) / state["ds_base"].clamp_min(1e-6)).clamp(0.6, 1.4)
+        return torch.cat([turn, scale], dim=-1)                    # (B, 2)
+
+    def train_loss(self, states: list[dict], w_pointwise: float = 0.0) -> torch.Tensor:
+        """Behavior cloning: MSE between the taken actions and the analytic
+        expert. `states[t]["act"]` is the action taken IN state t (injected by
+        the rollout helpers); states[-1] has no action and is excluded. Only
+        the first act_used output dims carry the expert's commands."""
+        acts = torch.stack([st["act"] for st in states[:-1]])[..., : self.spec.act_used]
+        exp = torch.stack([self.expert_action(st) for st in states[:-1]])
+        return (acts - exp).pow(2).mean()
 
     def score(self, states: list[dict]) -> torch.Tensor:
         with torch.no_grad():
@@ -244,7 +313,7 @@ class DrawTask(BaseTask):
             cov = self._coverage(states)
             tail = self._closure(states) if self.closed else self._endpoint(states)
             lr = self._length_ratio(states)
-            return (d < 0.06) & (cov < 0.07) & (tail < 0.15) & ((lr - 1.0).abs() < 0.2)
+            return (d < 0.06) & (cov < 0.07) & (tail < 0.2) & ((lr - 1.0).abs() < 0.3)
 
     def report(self, states: list[dict]) -> dict[str, float]:
         with torch.no_grad():

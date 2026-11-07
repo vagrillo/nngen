@@ -58,7 +58,7 @@ class OrbitTask(BaseTask):
         v_c = (MU / r0).sqrt()
         return (r - r0).abs(), (vt - v_c).abs()
 
-    def train_loss(self, states: list[dict]) -> torch.Tensor:
+    def train_loss(self, states: list[dict], w_pointwise: float = 0.0) -> torch.Tensor:
         dr, dvt = self._errors(states)
         crash = torch.relu(CRASH_R - torch.stack([self._radius(st).squeeze(-1) for st in states])).mean()
         return (dr ** 2).mean() + 0.3 * (dvt ** 2).mean() + 10.0 * crash

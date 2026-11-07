@@ -39,7 +39,11 @@ SEED_OFFSET = 1_000_000
 EVAL_SEED_OFFSET = 10_000
 
 # Per-task overrides: tasks whose dynamics need longer BPTT training.
-TRAIN_STEPS_OVERRIDES = {"bounce": 600, "evade": 500}
+TRAIN_STEPS_OVERRIDES = {
+    "bounce": 600,
+    "evade": 500,
+    **{f"draw_{s}": 1200 for s in ("circle", "square", "triangle", "pentagon", "star", "star4", "star6", "spiral", "line", "arc")},
+}
 
 
 def _batch_seed(task_name: str, batch_id: int, val: bool, salt: str = "") -> int:
@@ -50,6 +54,12 @@ def _batch_seed(task_name: str, batch_id: int, val: bool, salt: str = "") -> int
 class TaskTrainer:
     """Persistent batch trainer for one task: compiled rollout+loss, eager Adam.
 
+    Two modes:
+    - expert-cloning tasks (draw): a no-grad rollout collects visited states,
+      then ONE batched forward-with-grad regresses net(obs) -> expert action.
+      Per-step dense supervision, no fragile long-graph BPTT.
+    - other tasks: classic BPTT through the dynamics with task.train_loss.
+
     The compiled graph is built once per task (per process); every batch
     re-initializes the controller parameters in place and resets the optimizer.
     """
@@ -58,17 +68,39 @@ class TaskTrainer:
         self.task = task
         self.batch = batch
         self.net = BatchedController(batch, seed=0)
+        self.clones_expert = hasattr(task, "expert_action")
 
-        def step(state: dict, horizon: int) -> torch.Tensor:
-            states = [state]
-            for _ in range(horizon):
-                obs = task.observe(state)
-                action = self.net(obs)
-                state = task.dynamics(state, action)
-                states.append(state)
-            loss = task.train_loss(states)
-            loss.backward()
-            return loss.detach()
+        if self.clones_expert:
+            def step(state: dict, horizon: int, w_pointwise: torch.Tensor) -> torch.Tensor:
+                # Data collection follows the EXPERT (clean, on-curve states):
+                # pure behavior cloning, stable targets from step zero.
+                with torch.no_grad():
+                    visited = []
+                    for _ in range(horizon):
+                        visited.append(state)
+                        ea = task.expert_action(state)                       # (B, act)
+                        full = torch.zeros(self.batch, 8)
+                        full[:, : task.spec.act_used] = ea
+                        state = task.dynamics(state, full)
+                obs = torch.stack([task.observe(s) for s in visited])           # (T, B, 8)
+                act_pred = self.net.forward_time(obs)[..., : task.spec.act_used]  # (T, B, act)
+                exp = torch.stack([task.expert_action(s) for s in visited])     # (T, B, act)
+                loss = (act_pred - exp).pow(2).mean()
+                loss.backward()
+                return loss.detach()
+        else:
+            def step(state: dict, horizon: int, w_pointwise: torch.Tensor) -> torch.Tensor:
+                states = [state]
+                for _ in range(horizon):
+                    obs = task.observe(state)
+                    action = self.net(obs)
+                    states.append({**state, "act": action})  # action chosen IN this state
+                    state = task.dynamics(state, action)
+                states.append(state)  # terminal state, no action
+                states = states[1:]
+                loss = task.train_loss(states, w_pointwise)
+                loss.backward()
+                return loss.detach()
 
         self._step = torch.compile(step, dynamic=False) if use_compile else step
 
@@ -78,13 +110,21 @@ class TaskTrainer:
         gen = torch.Generator().manual_seed(seed)
         full = self.task.spec.steps
         for step in range(steps):
-            # Horizon ramp: short rollouts early (stabilizes BPTT through the
-            # dynamics), full episodes once the policy is roughly competent.
+            # Horizon ramp for BPTT tasks: short rollouts early (stabilizes
+            # gradients through the dynamics). Expert-cloning tasks supervise
+            # every state independently, so they always use full episodes.
             frac = step / max(1, steps)
-            horizon = 30 if frac < 0.3 else (60 if frac < 0.6 else full)
+            if self.clones_expert:
+                horizon = full
+            else:
+                horizon = 30 if frac < 0.3 else (60 if frac < 0.6 else full)
+            self.task.set_difficulty(frac)  # curriculum (draw sizes, etc.)
+            # Loss annealing for draw tasks: point-wise tracking first, then
+            # phase-free tracing with coverage (escapes the wiggle minimum).
+            w = max(0.0, 1.0 - step / 200.0)
             state = self.task.reset(self.batch, gen)  # new env instance per step
             opt.zero_grad(set_to_none=True)
-            self._step(state, horizon)
+            self._step(state, horizon, torch.tensor(w))
             opt.step()
         with torch.no_grad():
             eval_state = self.task.rollout(self.net, self.batch, seed=(seed + EVAL_SEED_OFFSET) & 0x7FFF_FFFF)

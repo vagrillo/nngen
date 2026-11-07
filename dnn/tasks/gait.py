@@ -69,7 +69,7 @@ class GaitTask(BaseTask):
     def _errs(self, states: list[dict]) -> torch.Tensor:
         return torch.stack([(forward_kinematics(st["h"], st["k"]) - self.target(st)).norm(dim=-1) for st in states])
 
-    def train_loss(self, states: list[dict]) -> torch.Tensor:
+    def train_loss(self, states: list[dict], w_pointwise: float = 0.0) -> torch.Tensor:
         errs = self._errs(states)[WARMUP:]
         # Smoothness: penalize angular jerk (second difference of the angles).
         h = torch.stack([st["h"] for st in states])

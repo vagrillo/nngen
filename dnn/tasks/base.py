@@ -47,8 +47,13 @@ class BaseTask(ABC):
         """(B, IN_DIM) observation; unused trailing dims are zero."""
 
     @abstractmethod
-    def train_loss(self, states: list[dict]) -> torch.Tensor:
-        """Differentiable surrogate loss over the trajectory (states[0] = init)."""
+    def train_loss(self, states: list[dict], w_pointwise: float = 0.0) -> torch.Tensor:
+        """Differentiable surrogate loss over the trajectory (states[0] = init).
+
+        `w_pointwise` is only used by tasks that anneal between a phase-locked
+        point-matching objective and their final objective (see draw.py);
+        other tasks ignore it.
+        """
 
     @abstractmethod
     def score(self, states: list[dict]) -> torch.Tensor:
@@ -61,6 +66,12 @@ class BaseTask(ABC):
     def report(self, states: list[dict]) -> dict[str, float]:
         """Aggregate no-grad metrics for eval tables (means over the batch)."""
         return {}
+
+    def set_difficulty(self, frac: float) -> None:
+        """Curriculum hook: frac in [0,1] scales task hardness (e.g. shape size,
+        ball speed). Default: constant difficulty. Called by the corpus trainer
+        OUTSIDE the compiled rollout (plain Python attribute writes)."""
+        return None
 
     # -- rollout helpers ----------------------------------------------------
     def rollout(self, net, batch: int, seed: int, grad: bool = False) -> list[dict]:
@@ -77,9 +88,10 @@ class BaseTask(ABC):
             for _ in range(self.spec.steps):
                 obs = self.observe(state)
                 action = net(obs)
+                states.append({**state, "act": action})  # action chosen IN this state
                 state = self.dynamics(state, action)
-                states.append(state)
-        return states
+            states.append(state)  # terminal state, no action
+        return states[1:]  # drop the bare init duplicate; states[t] = state t with act
 
 
 def dist(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:

@@ -50,7 +50,7 @@ class EvadeTask(BaseTask):
     def _dists(self, states: list[dict]) -> torch.Tensor:
         return torch.stack([dist(st["pos"], st["pursuer"]) for st in states])  # (T+1, B)
 
-    def train_loss(self, states: list[dict]) -> torch.Tensor:
+    def train_loss(self, states: list[dict], w_pointwise: float = 0.0) -> torch.Tensor:
         d = self._dists(states)
         keep_away = torch.relu(0.4 - d).mean()
         survive = torch.relu(self.CAUGHT + 0.03 - d).mean()

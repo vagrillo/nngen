@@ -129,6 +129,13 @@ class BatchedController(nn.Module):
         h = torch.tanh(torch.einsum("boi,bi->bo", W2, h) + b2)
         return torch.einsum("boi,bi->bo", W3, h) + b3
 
+    def forward_time(self, x: torch.Tensor) -> torch.Tensor:
+        """(T, B, IN_DIM) -> (T, B, OUT_DIM): independent controllers over time."""
+        W1, b1, W2, b2, W3, b3 = self.params
+        h = torch.tanh(torch.einsum("hoi,thi->tho", W1, x) + b1)
+        h = torch.tanh(torch.einsum("koi,tki->tko", W2, h) + b2)
+        return torch.einsum("moi,tmi->tmo", W3, h) + b3
+
     def get_flat(self) -> torch.Tensor:
         """(B, NUM_PARAMS) flat parameters in canonical order."""
         return torch.cat([p.reshape(p.shape[0], -1) for p in self.params], dim=1)

@@ -60,7 +60,7 @@ class BalanceTask(BaseTask):
             dim=-1,
         )
 
-    def train_loss(self, states: list[dict]) -> torch.Tensor:
+    def train_loss(self, states: list[dict], w_pointwise: float = 0.0) -> torch.Tensor:
         loss = 0.0
         for st in states:
             loss = loss + (st["th"] ** 2).mean() + 0.1 * (st["x"] ** 2).mean() + 0.01 * (st["thd"] ** 2).mean()
