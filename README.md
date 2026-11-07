@@ -1,5 +1,12 @@
 # GenAIGenAI — When AI Generates Generative AI
 
+> ⚠️ **WORK IN PROGRESS — EXPERIMENTAL RESEARCH.** This project is an
+> **exploration**, not a conclusion. We are studying whether a diffusion model
+> can generate neural networks instead of images; results so far are
+> provisional, the corpus and model are small, quality varies, and everything
+> here may change as the investigation continues. Nothing in this repository
+> is final or production-ready.
+
 <img width="653" height="473" alt="image" src="https://github.com/user-attachments/assets/ec9cbb96-6cc8-4140-abdc-2a6bec5a8112" />
 <img width="654" height="541" alt="image" src="https://github.com/user-attachments/assets/64524543-f0e0-4504-ade3-bfe882546032" />
 <img width="659" height="912" alt="image" src="https://github.com/user-attachments/assets/fcd71f86-20ce-44be-ab86-b92c37d7857a" />
@@ -165,6 +172,10 @@ scripts/               demos and utilities
 
 ## Status & honest limits
 
+- **This is an ongoing exploration.** The core question — can diffusion
+  generate neural networks usefully? — is still open, and we are still
+  studying it: expect changes, small numbers, and dead ends published as
+  honestly as successes.
 - **Research prototype**: one fixed-size controller architecture, simple
   behaviors, CPU-only training (the `mvp` preset trains in a few hours on 8
   cores; a GPU multiplies corpus size and model capacity by an order of
