@@ -108,6 +108,7 @@ def main() -> None:
     opt = torch.optim.AdamW(model.parameters(), lr=train_cfg.lr, weight_decay=train_cfg.weight_decay)
 
     start = 0
+    best_val = float("inf")
     if args.resume and (run_dir / CKPT_FILE).exists():
         ckpt = load_checkpoint(run_dir)
         model.load_state_dict(ckpt["model"])
@@ -174,11 +175,21 @@ def main() -> None:
                         ).item()
                     )
             model.train()
-            entry = {"step": step + 1, "val_loss": sum(val_losses) / len(val_losses)}
+            v = sum(val_losses) / len(val_losses)
+            entry = {"step": step + 1, "val_loss": v}
             history.append(entry)
             log_file.write(json.dumps(entry) + "\n")
             log_file.flush()
-            print(f"step {step+1}  val_loss {entry['val_loss']:.4f}", flush=True)
+            print(f"step {step+1}  val_loss {v:.4f}", flush=True)
+            # best-val checkpointing: small corpora overfit fast, so keep the
+            # best generalizing weights, not the last ones
+            if v < best_val:
+                best_val = v
+                save_checkpoint(
+                    run_dir, model, ema, opt, step, model_cfg, train_cfg, corpus.stats.to_json(), args.corpus
+                )
+                (run_dir / "BEST").write_text(f"step {step+1} val_loss {v:.4f}\n")
+                print(f"best-val checkpoint (step {step+1}, {v:.4f}) -> {run_dir / CKPT_FILE}", flush=True)
 
         if (step + 1) % train_cfg.ckpt_every == 0 or (step + 1) == train_cfg.steps:
             save_checkpoint(
