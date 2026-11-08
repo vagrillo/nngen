@@ -176,6 +176,10 @@ scripts/               demos and utilities
   generate neural networks usefully? — is still open, and we are still
   studying it: expect changes, small numbers, and dead ends published as
   honestly as successes.
+- 📋 **Read [FINDINGS.md](FINDINGS.md)** for the current honest state: what
+  works, what does not (the generative step does **not** yet produce
+  networks passing our strict bar — 0/28 in the latest systematic hunt), the
+  measured root cause, and the dataset-scaling experiment in progress.
 - **Research prototype**: one fixed-size controller architecture, simple
   behaviors, CPU-only training (the `mvp` preset trains in a few hours on 8
   cores; a GPU multiplies corpus size and model capacity by an order of
